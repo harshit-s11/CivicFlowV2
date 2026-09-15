@@ -208,7 +208,7 @@ const TrackComplaint = () => {
                   </p>
                </div>
                <div className="pt-2">
-                  <ComplaintTimeline currentStatus={complaint.status} />
+                  <ComplaintTimeline currentStatus={complaint.status} events={events} />
                </div>
             </div>
 

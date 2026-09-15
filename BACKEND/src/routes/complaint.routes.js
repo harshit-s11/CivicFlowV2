@@ -18,6 +18,7 @@ import {
    acceptComplaint,
    rejectComplaint,
    resolveComplaint,
+   confirmResolution,
 } from "../controller/complaint.controller.js";
 import {
    validateCreateComplaint,
@@ -26,6 +27,7 @@ import {
    validateComplaintAssignment,
    validateComplaintRejection,
    validateComplaintResolution,
+   validateConfirmResolution,
 } from "../validator/complaint.validator.js";
 
 const router = express.Router();
@@ -150,6 +152,14 @@ router.delete(
    authenticate,
    requireRole("citizen"),
    deleteComplaint
+);
+
+router.patch(
+   "/complaints/:id/confirm-resolution",
+   authenticate,
+   requireRole("citizen"),
+   validateConfirmResolution,
+   confirmResolution
 );
 
 export default router;

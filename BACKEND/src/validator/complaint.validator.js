@@ -11,6 +11,9 @@ const protectedFields = [
    "duplicateOf",
    "resolutionDescription",
    "resolutionMedia",
+   "resolvedAt",
+   "confirmationDeadline",
+   "citizenFeedback",
 ];
 
 const supportedMediaTypePattern = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|quicktime|x-msvideo|webm))$/i;
@@ -161,5 +164,14 @@ export const validateComplaintAssignment = [
    validateRequest,
 ];
 
+export const validateConfirmResolution = [
+   body("decision")
+      .isIn(["accept", "reject"])
+      .withMessage('Decision must be either "accept" or "reject"'),
+   body("feedback").optional().isString().trim(),
+   validateRequest,
+];
+
 export const validateComplaintCreation = validateCreateComplaint;
 export const validateComplaintUpdate = validateUpdateComplaint;
+

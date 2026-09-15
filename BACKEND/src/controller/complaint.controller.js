@@ -4,6 +4,7 @@ import Department from "../model/department.model.js";
 import { recordComplaintTimeline } from "./complaintTimeline.controller.js";
 import { findSimilarComplaints } from "../service/complaintSimilarity.service.js";
 import { uploadMedia, validateMediaFile } from "../service/imagekit.service.js";
+import { config } from "../config/config.js";
 
 const citizenQuery = (req) => ({ citizenId: req.user._id });
 
@@ -232,7 +233,7 @@ const recordStaffStatusChange = async (complaint, req, previousStatus, action = 
       performedBy: req.user._id,
       previousStatus,
       newStatus: complaint.status,
-      remark: req.body.remark,
+      remark: req.body?.remark,
    });
 };
 
@@ -342,12 +343,21 @@ export const updateComplaintStatus = async (req, res) => {
             error: `Cannot change complaint status from ${previousStatus} to ${newStatus}`,
          });
       }
+
+      if (previousStatus === "resolved" && newStatus === "closed") {
+         if (complaint.confirmationDeadline && new Date() < new Date(complaint.confirmationDeadline)) {
+            return res.status(409).json({
+               error: "Cannot close complaint before citizen confirmation deadline has expired",
+            });
+         }
+      }
+
       complaint.status = newStatus;
       await complaint.save();
 
       await recordComplaintTimeline({
          complaintId: complaint._id,
-         action: "status_changed",
+         action: newStatus === "closed" ? "closed" : "status_changed",
          performedBy: req.user._id,
          previousStatus,
          newStatus: complaint.status,
@@ -379,6 +389,10 @@ export const resolveComplaint = async (req, res) => {
       complaint.status = "resolved";
       complaint.resolutionDescription = req.body.resolutionDescription;
       complaint.resolutionMedia = req.body.resolutionMedia ?? [];
+      complaint.resolvedAt = new Date();
+      const windowMinutes = config.CONFIRMATION_WINDOW_MINUTES || 5;
+      complaint.confirmationDeadline = new Date(Date.now() + windowMinutes * 60 * 1000);
+      complaint.citizenFeedback = null;
       await complaint.save();
       await recordStaffStatusChange(complaint, req, previousStatus, "resolved");
       return res.status(200).json(complaint);
@@ -449,6 +463,75 @@ export const deleteComplaint = async (req, res) => {
       return res.status(200).json({ message: "Complaint deleted successfully" });
    } catch (error) {
       console.error("Error deleting complaint:", error);
+      if (error.name === "CastError") {
+         return res.status(400).json({ error: "Invalid complaint ID" });
+      }
+      return res.status(500).json({ error: "Internal server error" });
+   }
+};
+
+export const confirmResolution = async (req, res) => {
+   try {
+      const complaint = await Complaint.findOne({
+         _id: req.params.id,
+         citizenId: req.user._id,
+         status: { $ne: "deleted" },
+      });
+
+      if (!complaint) {
+         return res.status(404).json({ error: "Complaint not found" });
+      }
+
+      if (complaint.status !== "resolved") {
+         return res.status(409).json({
+            error: "Resolution confirmation is only available for resolved complaints",
+         });
+      }
+
+      const { decision, feedback } = req.body;
+      const previousStatus = complaint.status;
+
+      if (decision === "accept") {
+         complaint.status = "closed";
+         complaint.resolvedAt = null;
+         complaint.confirmationDeadline = null;
+         if (feedback) {
+            complaint.citizenFeedback = feedback;
+         }
+         await complaint.save();
+
+         await recordComplaintTimeline({
+            complaintId: complaint._id,
+            action: "closed",
+            performedBy: req.user._id,
+            previousStatus,
+            newStatus: "closed",
+            remark: feedback || "Resolution accepted by citizen",
+         });
+
+         return res.status(200).json(complaint);
+      } else if (decision === "reject") {
+         complaint.status = "in_progress";
+         complaint.citizenFeedback = feedback || "Citizen requested further attention";
+         complaint.resolvedAt = null;
+         complaint.confirmationDeadline = null;
+         await complaint.save();
+
+         await recordComplaintTimeline({
+            complaintId: complaint._id,
+            action: "status_changed",
+            performedBy: req.user._id,
+            previousStatus,
+            newStatus: "in_progress",
+            remark: feedback || "Citizen rejected resolution and requested further attention",
+         });
+
+         return res.status(200).json(complaint);
+      } else {
+         return res.status(400).json({ error: 'Decision must be "accept" or "reject"' });
+      }
+   } catch (error) {
+      console.error("Error confirming resolution:", error);
       if (error.name === "CastError") {
          return res.status(400).json({ error: "Invalid complaint ID" });
       }

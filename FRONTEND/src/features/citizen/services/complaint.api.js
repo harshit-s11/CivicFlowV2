@@ -111,3 +111,12 @@ export async function getComplaintTimeline(complaintId) {
    const response = await complaintApiInstance.get(`/complaints/${complaintId}/timeline`);
    return response.data;
 }
+
+export async function confirmResolution(complaintId, { decision, feedback }) {
+   const response = await complaintApiInstance.patch(
+      `/complaints/${complaintId}/confirm-resolution`,
+      { decision, feedback }
+   );
+   return response.data;
+}
+

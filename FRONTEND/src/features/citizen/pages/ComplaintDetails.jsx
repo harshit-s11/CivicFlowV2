@@ -1,23 +1,123 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import ComplaintStatus from "../../../components/complaint/ComplaintStatus";
 import ComplaintTimeline from "../../../components/complaint/ComplaintTimeline";
 import GroupedReportsSummary from "../../../components/complaint/GroupedReportsSummary";
 import ComplaintMap from "../../../components/maps/ComplaintMap";
-import { deleteComplaint, getComplaintById } from "../services/complaint.api";
+import {
+   deleteComplaint,
+   getComplaintById,
+   confirmResolution,
+   getComplaintTimeline,
+} from "../services/complaint.api";
 
 const CitizenComplaintDetails = () => {
    const { id } = useParams();
    const navigate = useNavigate();
    const [complaint, setComplaint] = useState(null);
+   const [events, setEvents] = useState([]);
    const [error, setError] = useState("");
    const [deleting, setDeleting] = useState(false);
 
-   useEffect(() => {
-      getComplaintById(id)
-         .then(setComplaint)
-         .catch(() => setError("Complaint not found or you are not authorized to view it."));
+   // Resolution confirmation state
+   const [actionLoading, setActionLoading] = useState(false);
+   const [actionError, setActionError] = useState("");
+   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
+   const [feedbackText, setFeedbackText] = useState("");
+   const [remainingTime, setRemainingTime] = useState("");
+   const [isExpired, setIsExpired] = useState(false);
+   const hasRefreshedOnExpiry = useRef(false);
+
+   const loadData = useCallback(async () => {
+      try {
+         const [complaintData, timelineData] = await Promise.all([
+            getComplaintById(id),
+            getComplaintTimeline(id).catch(() => []),
+         ]);
+         setComplaint(complaintData);
+         setEvents(timelineData || []);
+      } catch {
+         setError("Complaint not found or you are not authorized to view it.");
+      }
    }, [id]);
+
+   useEffect(() => {
+      loadData();
+   }, [loadData]);
+
+   // Countdown for confirmation window
+   useEffect(() => {
+      if (complaint?.status !== "resolved" || !complaint?.confirmationDeadline) {
+         setRemainingTime("");
+         setIsExpired(false);
+         hasRefreshedOnExpiry.current = false;
+         return;
+      }
+
+      const updateCountdown = () => {
+         const now = Date.now();
+         const deadline = new Date(complaint.confirmationDeadline).getTime();
+         const diff = deadline - now;
+
+         if (diff <= 0) {
+            setRemainingTime("Expired");
+            setIsExpired(true);
+            if (!hasRefreshedOnExpiry.current) {
+               hasRefreshedOnExpiry.current = true;
+               loadData();
+            }
+         } else {
+            setIsExpired(false);
+            const totalSecs = Math.floor(diff / 1000);
+            const hours = Math.floor(totalSecs / 3600);
+            const minutes = Math.floor((totalSecs % 3600) / 60);
+            const seconds = totalSecs % 60;
+            if (hours > 0) {
+               setRemainingTime(`${hours}h ${minutes}m ${seconds}s`);
+            } else if (minutes > 0) {
+               setRemainingTime(`${minutes}m ${seconds}s`);
+            } else {
+               setRemainingTime(`${seconds}s`);
+            }
+         }
+      };
+
+      updateCountdown();
+      const interval = setInterval(updateCountdown, 1000);
+      return () => clearInterval(interval);
+   }, [complaint?.status, complaint?.confirmationDeadline, loadData]);
+
+   async function handleAcceptResolution() {
+      setActionLoading(true);
+      setActionError("");
+      try {
+         await confirmResolution(id, { decision: "accept" });
+         await loadData();
+      } catch (err) {
+         setActionError(
+            err?.response?.data?.error || err?.response?.data?.message || err?.message || "Failed to confirm resolution. Please try again."
+         );
+      } finally {
+         setActionLoading(false);
+      }
+   }
+
+   async function handleRejectResolution() {
+      setActionLoading(true);
+      setActionError("");
+      try {
+         await confirmResolution(id, { decision: "reject", feedback: feedbackText.trim() });
+         setIsDisputeModalOpen(false);
+         setFeedbackText("");
+         await loadData();
+      } catch (err) {
+         setActionError(
+            err?.response?.data?.error || err?.response?.data?.message || err?.message || "Failed to request further attention. Please try again."
+         );
+      } finally {
+         setActionLoading(false);
+      }
+   }
 
    async function remove() {
       if (!window.confirm("Are you sure you want to delete this complaint? This action cannot be undone.")) {
@@ -202,10 +302,34 @@ const CitizenComplaintDetails = () => {
                </div>
             )}
 
-            {complaint.status === "resolved" && (
-               <div className="flex items-start gap-3 rounded-xl border border-[#C6E7D5] bg-[#ECF5F0] p-4 text-[#28704F] shadow-xs">
+            {complaint.status === "in_progress" && complaint.citizenFeedback && (
+               <div className="flex items-start gap-3 rounded-xl border border-[#CBD2CF] bg-[#F1F3F2] p-4 text-[#17202A] shadow-xs">
                   <svg
-                     className="h-5 w-5 shrink-0 mt-0.5 text-[#28704F]"
+                     className="h-5 w-5 text-[#173B5E] shrink-0 mt-0.5"
+                     fill="none"
+                     viewBox="0 0 24 24"
+                     stroke="currentColor"
+                     strokeWidth={2}
+                  >
+                     <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                     />
+                  </svg>
+                  <div>
+                     <h2 className="text-sm font-bold text-[#17202A]">Further Work Requested</h2>
+                     <p className="mt-0.5 text-xs text-[#52606D]">
+                        You requested further attention on this complaint: "{complaint.citizenFeedback}". The department has been notified to resume work.
+                     </p>
+                  </div>
+               </div>
+            )}
+
+            {complaint.status === "closed" && (
+               <div className="flex items-start gap-3 rounded-xl border border-[#CBD2CF] bg-[#F1F3F2] p-4 text-[#17202A] shadow-xs">
+                  <svg
+                     className="h-5 w-5 text-[#28704F] shrink-0 mt-0.5"
                      fill="none"
                      viewBox="0 0 24 24"
                      stroke="currentColor"
@@ -218,15 +342,93 @@ const CitizenComplaintDetails = () => {
                      />
                   </svg>
                   <div>
-                     <h2 className="text-sm font-bold text-[#28704F]">Work Resolved</h2>
-                     <p className="mt-0.5 text-xs text-[#28704F]">
-                        Department staff has completed work on this complaint.
-                        {complaint.resolutionDescription && (
-                           <span className="block mt-1 italic">
-                              "{complaint.resolutionDescription}"
-                           </span>
-                        )}
+                     <h2 className="text-sm font-bold text-[#17202A]">Complaint Closed</h2>
+                     <p className="mt-0.5 text-xs text-[#52606D]">
+                        This complaint is finalized and officially closed. No further actions are required.
                      </p>
+                  </div>
+               </div>
+            )}
+
+            {complaint.status === "resolved" && (
+               <div className="flex flex-col gap-4 rounded-2xl border-2 border-[#173B5E]/20 bg-white p-5 sm:p-6 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                     <div>
+                        <div className="flex items-center gap-2">
+                           <h2 className="text-base font-bold text-[#17202A] sm:text-lg">
+                              Resolution Review
+                           </h2>
+                           <span className="inline-flex items-center rounded-full bg-[#EEF4FA] px-2.5 py-0.5 text-xs font-semibold text-[#173B5E] border border-[#D2E3F3]">
+                              Action Required
+                           </span>
+                        </div>
+                        <p className="mt-1 text-sm text-[#52606D]">
+                           The department has marked this complaint as resolved. Please confirm whether the issue has been satisfactorily addressed.
+                        </p>
+                        {complaint.resolutionDescription && (
+                           <div className="mt-2 rounded-lg bg-[#F1F3F2] p-3 text-xs text-[#17202A] border border-[#E2E6E4]">
+                              <span className="font-semibold text-[#52606D]">Resolution notes: </span>
+                              "{complaint.resolutionDescription}"
+                           </div>
+                        )}
+                     </div>
+                     {complaint.confirmationDeadline && (
+                        <div className="flex flex-col items-end rounded-xl border border-[#CBD2CF] bg-[#F7F7F5] px-3.5 py-2 text-right shrink-0">
+                           <span className="text-[10px] font-semibold uppercase tracking-wider text-[#87919B]">
+                              Confirmation Deadline
+                           </span>
+                           <div className="mt-0.5 flex items-center gap-1.5 font-mono text-xs font-bold text-[#173B5E]">
+                              <svg className="h-3.5 w-3.5 text-[#173B5E]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              <span>{isExpired ? "Window Expired" : remainingTime}</span>
+                           </div>
+                           <span className="text-[10px] text-[#52606D] mt-0.5">
+                              {new Date(complaint.confirmationDeadline).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                           </span>
+                        </div>
+                     )}
+                  </div>
+
+                  {isExpired && (
+                     <p className="text-xs text-[#52606D] border-t border-[#E2E6E4] pt-3">
+                        The confirmation window has expired. You may still respond below while this complaint remains resolved — otherwise, the assigned department staff may close it on your behalf.
+                     </p>
+                  )}
+
+                  {actionError && (
+                     <div className="rounded-lg border border-[#F3D0D0] bg-[#FBF0F0] p-3 text-xs text-[#A44A4A]">
+                        {actionError}
+                     </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-[#E2E6E4]">
+                     <button
+                        type="button"
+                        onClick={handleAcceptResolution}
+                        disabled={actionLoading}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[#28704F] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1E563C] cursor-pointer disabled:opacity-50"
+                     >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        {actionLoading ? "Updating..." : "Accept Resolution"}
+                     </button>
+
+                     <button
+                        type="button"
+                        onClick={() => {
+                           setActionError("");
+                           setIsDisputeModalOpen(true);
+                        }}
+                        disabled={actionLoading}
+                        className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-[#CBD2CF] bg-white px-5 py-2.5 text-sm font-semibold text-[#17202A] shadow-sm transition-colors hover:bg-[#F1F3F2] cursor-pointer disabled:opacity-50"
+                     >
+                        <svg className="h-4 w-4 text-[#52606D]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Request Further Attention
+                     </button>
                   </div>
                </div>
             )}
@@ -392,7 +594,7 @@ const CitizenComplaintDetails = () => {
                   </Link>
                </div>
                <div className="mt-4 pt-1">
-                  <ComplaintTimeline currentStatus={complaint.status} />
+                  <ComplaintTimeline currentStatus={complaint.status} events={events} />
                </div>
             </div>
 
@@ -444,6 +646,82 @@ const CitizenComplaintDetails = () => {
                   </button>
                )}
             </div>
+
+            {/* ── Dispute / Request Further Attention Modal ── */}
+            {isDisputeModalOpen && (
+               <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="dispute-dialog-title"
+               >
+                  <div className="w-full max-w-lg rounded-2xl border border-[#E2E6E4] bg-white p-6 shadow-xl">
+                     <div className="flex items-center justify-between">
+                        <h3 id="dispute-dialog-title" className="text-lg font-bold text-[#17202A]">
+                           Request Further Attention
+                        </h3>
+                        <button
+                           type="button"
+                           onClick={() => !actionLoading && setIsDisputeModalOpen(false)}
+                           disabled={actionLoading}
+                           className="text-[#87919B] hover:text-[#17202A] p-1 rounded-md cursor-pointer"
+                           aria-label="Close dialog"
+                        >
+                           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                           </svg>
+                        </button>
+                     </div>
+
+                     <p className="mt-2 text-xs text-[#52606D]">
+                        If the issue has not been satisfactorily addressed, please let the department know what still needs attention. The complaint will be returned to <strong>In Progress</strong> status for the assigned team.
+                     </p>
+
+                     {actionError && (
+                        <div className="mt-3 rounded-lg border border-[#F3D0D0] bg-[#FBF0F0] p-3 text-xs text-[#A44A4A]">
+                           {actionError}
+                        </div>
+                     )}
+
+                     <div className="mt-4">
+                        <label
+                           htmlFor="citizen-feedback"
+                           className="block text-xs font-bold uppercase tracking-wider text-[#52606D]"
+                        >
+                           What still needs attention? <span className="font-normal text-[#87919B]">(Optional)</span>
+                        </label>
+                        <textarea
+                           id="citizen-feedback"
+                           rows={4}
+                           value={feedbackText}
+                           onChange={(e) => setFeedbackText(e.target.value)}
+                           disabled={actionLoading}
+                           placeholder="Explain what work remains incomplete or needs further inspection..."
+                           className="mt-1.5 w-full rounded-xl border border-[#CBD2CF] bg-[#F7F7F5] p-3 text-sm text-[#17202A] placeholder-[#87919B] focus:border-[#173B5E] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#173B5E]"
+                        />
+                     </div>
+
+                     <div className="mt-6 flex items-center justify-end gap-3">
+                        <button
+                           type="button"
+                           onClick={() => setIsDisputeModalOpen(false)}
+                           disabled={actionLoading}
+                           className="min-h-[40px] rounded-lg border border-[#CBD2CF] px-4 py-2 text-xs font-semibold text-[#52606D] hover:bg-[#F1F3F2] cursor-pointer disabled:opacity-50"
+                        >
+                           Cancel
+                        </button>
+                        <button
+                           type="button"
+                           onClick={handleRejectResolution}
+                           disabled={actionLoading}
+                           className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-[#173B5E] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[#122E4A] cursor-pointer disabled:opacity-50"
+                        >
+                           {actionLoading ? "Submitting..." : "Submit Request"}
+                        </button>
+                     </div>
+                  </div>
+               </div>
+            )}
          </div>
       </div>
    );

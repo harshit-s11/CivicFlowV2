@@ -955,19 +955,16 @@ const AdminDashboard = () => {
                   </div>
                </div>
 
-               {/* Active Filter & Roster Grounding Notice */}
+               {/* Active Filter Notice */}
                <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-white border border-[#E2E6E4] rounded-xl text-xs">
                   <div className="flex items-center gap-2">
                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#52606D]">
-                        ROSTER FILTER:
+                        Filter:
                      </span>
                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#ECF5F0] text-[#28704F] border border-[#B7DEC9]">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#28704F]"></span>
-                        Status: Active Municipal Divisions
+                        Showing active departments
                      </span>
-                  </div>
-                  <div className="text-[#87919B] text-xs">
-                     Factual contract: GET /api/departments delivers active records only ({departments.length} displayed)
                   </div>
                </div>
 
@@ -1250,16 +1247,6 @@ const AdminDashboard = () => {
                         </div>
                      </>
                   )}
-
-                  {/* Roster Technical Footnote */}
-                  <div className="px-5 py-3 bg-[#F7F7F5] border-t border-[#E2E6E4] flex flex-col sm:flex-row justify-between items-center text-xs text-[#52606D] gap-2">
-                     <span>
-                        Schema Model: <code className="text-[#17202A] font-mono">Department &#123; fullname, code, description, categories[], isActive, createdAt, updatedAt &#125;</code>
-                     </span>
-                     <span className="text-right">
-                        Endpoints: <code className="font-mono text-[#173B5E]">GET | POST | PATCH | DELETE /api/departments</code>
-                     </span>
-                  </div>
                </div>
             </section>
 

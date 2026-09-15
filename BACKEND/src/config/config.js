@@ -34,4 +34,5 @@ export const config = {
    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
    NODE_ENV: process.env.NODE_ENV,
    IMAGE_KIT_PRIVATE_KEY: process.env.IMAGE_KIT_PRIVATE_KEY,
-}
+   CONFIRMATION_WINDOW_MINUTES: parseInt(process.env.CONFIRMATION_WINDOW_MINUTES, 10) || 5,
+};

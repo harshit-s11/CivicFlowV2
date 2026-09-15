@@ -130,6 +130,19 @@ const complaintSchema = new mongoose.Schema(
             },
          },
       ],
+      resolvedAt: {
+         type: Date,
+         default: null,
+      },
+      confirmationDeadline: {
+         type: Date,
+         default: null,
+      },
+      citizenFeedback: {
+         type: String,
+         trim: true,
+         default: null,
+      },
    },
    {
       timestamps: true,
